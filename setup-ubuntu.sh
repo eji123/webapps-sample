@@ -163,7 +163,8 @@ pm2 start server.js --name "freshmart-app"
 pm2 save
 
 # Register PM2 with systemd so the app auto-starts if the private EC2 instance reboots
-sudo env PATH=$PATH:/usr/bin /usr/lib/node_modules/pm2/bin/pm2 startup systemd -u "$USER" --hp "$HOME" >/dev/null 2>&1 || true
+PM2_BIN=$(command -v pm2 || echo "/usr/local/bin/pm2")
+sudo env PATH=$PATH:/usr/bin:/usr/local/bin "$PM2_BIN" startup systemd -u "$(whoami)" --hp "$HOME" >/dev/null 2>&1 || true
 pm2 save >/dev/null 2>&1 || true
 
 # Query EC2 Instance Metadata (IMDSv2) for Private IP, Instance ID, and AZ (No Public IP needed)
