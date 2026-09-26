@@ -86,6 +86,38 @@ EOF
   fi
 fi
 
+# Upload local assets/images/* to Amazon S3 if S3_BUCKET_NAME is set in .env
+S3_BUCKET_VAL=$(grep -E '^S3_BUCKET_NAME=' .env | cut -d '=' -f2- | tr -d '\r"'\'' ' || true)
+AWS_REGION_VAL=$(grep -E '^AWS_REGION=' .env | cut -d '=' -f2- | tr -d '\r"'\'' ' || echo "ap-southeast-1")
+if [ -n "$S3_BUCKET_VAL" ]; then
+  echo "☁️  Uploading local assets/images/* to Private S3 Bucket (s3://${S3_BUCKET_VAL}/assets/images/)..."
+  node -e '
+    const fs = require("fs");
+    const path = require("path");
+    const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+    const bucket = process.argv[1];
+    const region = process.argv[2] || "ap-southeast-1";
+    const s3 = new S3Client({ region });
+    const dir = path.join(__dirname, "assets", "images");
+    (async () => {
+      const files = fs.readdirSync(dir).filter(f => /\.(svg|png|jpg|jpeg)$/i.test(f));
+      for (const file of files) {
+        const ext = path.extname(file).toLowerCase();
+        const type = ext === ".svg" ? "image/svg+xml" : ext === ".png" ? "image/png" : "image/jpeg";
+        await s3.send(new PutObjectCommand({
+          Bucket: bucket,
+          Key: `assets/images/${file}`,
+          Body: fs.readFileSync(path.join(dir, file)),
+          ContentType: type
+        }));
+        console.log(`   ✔ Uploaded s3://${bucket}/assets/images/${file}`);
+      }
+    })().catch(e => console.warn("   ⚠️ S3 upload skipped/failed:", e.message));
+  ' "$S3_BUCKET_VAL" "$AWS_REGION_VAL"
+else
+  echo "ℹ️  S3_BUCKET_NAME in .env is empty — skipping S3 asset upload for now."
+fi
+
 # 5. Configure Nginx on Port 80 for AWS Application Load Balancer (ALB) traffic
 echo "🌐 [5/6] Configuring Nginx for AWS Application Load Balancer (Port 80 -> 3000)..."
 sudo tee /etc/nginx/sites-available/freshmart >/dev/null <<'EOF'
