@@ -220,18 +220,93 @@ function saveLocalCart() {
   localStorage.setItem(STORAGE_KEYS.CART, JSON.stringify(cart));
 }
 
-// Sync with Backend API if MySQL database is active
+let dbTelemetry = {
+  connected: false,
+  host: 'localhost',
+  dbName: 'freshmart',
+  instanceHostname: 'local-browser',
+  error: 'Not connected to MySQL/RDS'
+};
+
+function updateConnectionStatusUI() {
+  const ec2Pill = document.getElementById('ec2StatusPill');
+  const rdsPill = document.getElementById('rdsStatusPill');
+  const banner = document.getElementById('dbAlertBanner');
+
+  if (ec2Pill) {
+    ec2Pill.textContent = `🖥️ EC2 Host: ${dbTelemetry.instanceHostname || 'standalone'}`;
+  }
+
+  if (rdsPill) {
+    rdsPill.classList.remove('rds-connected', 'rds-disconnected');
+    if (dbTelemetry.connected) {
+      rdsPill.classList.add('rds-connected');
+      rdsPill.textContent = `🟢 RDS MySQL: Connected (${dbTelemetry.host})`;
+    } else {
+      rdsPill.classList.add('rds-disconnected');
+      rdsPill.textContent = `🟠 RDS MySQL: Disconnected (Fallback Mode)`;
+    }
+  }
+
+  if (banner) {
+    banner.style.display = 'flex';
+    banner.classList.remove('banner-connected', 'banner-disconnected');
+    if (dbTelemetry.connected) {
+      banner.classList.add('banner-connected');
+      banner.innerHTML = `
+        <div>
+          <strong>✅ Connected to Amazon RDS / MySQL Database</strong> —
+          Host: <code>${escapeHtml(dbTelemetry.host)}</code> | Database: <code>${escapeHtml(dbTelemetry.dbName)}</code>.
+          All products and orders are stored permanently in MySQL RDS.
+        </div>
+        <span class="source-tag source-rds">🗄️ Live RDS Storage</span>
+      `;
+    } else {
+      banner.classList.add('banner-disconnected');
+      banner.innerHTML = `
+        <div>
+          <strong>⚠️ RDS Database Disconnected (Running in Local Fallback Mode)</strong> —
+          Could not connect to MySQL at <code>${escapeHtml(dbTelemetry.host)}</code>
+          ${dbTelemetry.error ? `(<code>${escapeHtml(dbTelemetry.error)}</code>)` : ''}.
+          The store remains functional using temporary local memory so you can still test the UI.
+        </div>
+        <span class="source-tag source-fallback">📦 Local Fallback Data</span>
+      `;
+    }
+  }
+}
+
+// Sync with Backend API and check MySQL / RDS Database status
 async function syncWithServer() {
+  try {
+    const healthRes = await fetch('/api/health');
+    if (healthRes.ok) {
+      const health = await healthRes.json();
+      isDatabaseConnected = Boolean(health.db_connected);
+      dbTelemetry = {
+        connected: Boolean(health.db_connected),
+        host: health.db_host || 'localhost',
+        dbName: health.db_name || 'freshmart',
+        instanceHostname: health.instance_hostname || 'ubuntu-ec2',
+        error: health.db_error || null
+      };
+    }
+  } catch {
+    isDatabaseConnected = false;
+  }
+
   try {
     const res = await fetch('/api/products');
     if (res.ok) {
+      const sourceHeader = res.headers.get('X-Data-Source');
       const serverProducts = await res.json();
       if (Array.isArray(serverProducts) && serverProducts.length > 0) {
-        isDatabaseConnected = true;
+        isDatabaseConnected = sourceHeader === 'rds-mysql' || dbTelemetry.connected;
         products = serverProducts.map((item) => ({
           ...item,
           price: Number(item.price),
           stock: Number(item.stock),
+          data_source: item.data_source || (isDatabaseConnected ? 'rds' : 'fallback'),
           fallback_svg: createGrocerySvg(item.name, '#dcfce7', '🛒')
         }));
         saveLocalProducts();
@@ -254,6 +329,7 @@ async function syncWithServer() {
     // Fallback to localStorage orders
   }
 
+  updateConnectionStatusUI();
   renderCatalog();
   renderInventoryTable();
   updateOrderCountBadge();
@@ -298,6 +374,7 @@ function renderCatalog() {
       const cartEntry = cart.find((c) => Number(c.id) === Number(item.id));
       const qtyInCart = cartEntry ? cartEntry.qty : 0;
       const fallbackImg = item.fallback_svg || createGrocerySvg(item.name, '#dcfce7', '🛒');
+      const isRdsItem = isDatabaseConnected && item.data_source === 'rds';
 
       return `
         <article class="product-card">
@@ -312,7 +389,12 @@ function renderCatalog() {
             />
           </div>
           <div class="product-body">
-            <div class="product-cat">${escapeHtml(item.category)}</div>
+            <div class="product-cat">
+              ${escapeHtml(item.category)}
+              <span class="source-tag ${isRdsItem ? 'source-rds' : 'source-fallback'}">
+                ${isRdsItem ? '🗄️ RDS DB' : '📦 Fallback'}
+              </span>
+            </div>
             <h3 class="product-title">${escapeHtml(item.name)}</h3>
             <div class="product-unit">${escapeHtml(item.unit || '1 Pack')}</div>
             <div class="product-footer">
@@ -535,7 +617,18 @@ document.addEventListener('DOMContentLoaded', () => {
   updateCartUI();
   renderInventoryTable();
   updateOrderCountBadge();
+  updateConnectionStatusUI();
   syncWithServer();
+
+  document.getElementById('refreshDbStatusBtn')?.addEventListener('click', async () => {
+    showToast('Checking RDS MySQL connection...');
+    await syncWithServer();
+    showToast(
+      dbTelemetry.connected
+        ? `Connected to RDS (${dbTelemetry.host})`
+        : `RDS Disconnected — Using Local Fallback`
+    );
+  });
 
   // Search
   const searchInput = document.getElementById('searchInput');
