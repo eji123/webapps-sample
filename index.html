@@ -7,15 +7,11 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- Promo & AWS Infrastructure Status Bar -->
+  <!-- Promo Banner -->
   <div class="promo-bar">
     <div class="container promo-inner">
-      <div class="status-pills-wrap">
-        <span class="infra-pill" id="ec2StatusPill">🖥️ EC2: Checking...</span>
-        <span class="infra-pill status-checking" id="rdsStatusPill">🗄️ RDS Database: Checking...</span>
-      </div>
+      <span>🥬 Free Same-Day Delivery on orders over <strong>$35.00</strong>! Use code <code>FRESH10</code> for 10% off.</span>
       <div class="promo-links">
-        <button type="button" class="link-btn" id="refreshDbStatusBtn" title="Re-check RDS connection">🔄 Check DB</button>
         <button type="button" class="link-btn" id="openOrdersBtn">📋 My Orders (<span id="orderCountText">0</span>)</button>
         <button type="button" class="link-btn" id="openManageBtn">➕ Manage Store Products</button>
       </div>
@@ -57,9 +53,6 @@
 
   <!-- Main Content -->
   <main class="container">
-    <!-- Dynamic Database Connection Banner (Shows clear difference between RDS Connected vs Disconnected) -->
-    <div id="dbAlertBanner" class="db-alert-banner" style="display: none;"></div>
-
     <!-- Hero Banner -->
     <section class="hero-section">
       <div class="hero-content">

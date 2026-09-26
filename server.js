@@ -1,13 +1,13 @@
 /**
  * FreshMart Online Grocery Store - Node.js Server
  * Configured for Ubuntu EC2 behind an AWS Application Load Balancer (ALB) + Nginx.
- * Reports real-time RDS / MySQL connection telemetry while maintaining a seamless fallback mode.
+ * - Website UI (HTML/CSS/JS) & /health always respond on Port 3000 (Never 502 Bad Gateway).
+ * - Grocery Catalog (/api/products) & Orders (/api/orders) strictly require an active MySQL / RDS connection.
  */
 
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
-const http = require('http');
 
 process.on('uncaughtException', (err) => {
   console.error('[Uncaught Exception]', err.message);
@@ -18,7 +18,7 @@ process.on('unhandledRejection', (err) => {
 
 function loadEnvFile() {
   try {
-    require('dotenv').config();
+    require('dotenv').config({ override: true });
   } catch {
     const envPath = path.join(__dirname, '.env');
     if (fs.existsSync(envPath)) {
@@ -30,7 +30,7 @@ function loadEnvFile() {
         if (eqIdx > 0) {
           const key = trimmed.slice(0, eqIdx).trim();
           const val = trimmed.slice(eqIdx + 1).trim();
-          if (!process.env[key]) process.env[key] = val;
+          process.env[key] = val;
         }
       }
     }
@@ -40,256 +40,232 @@ function loadEnvFile() {
 loadEnvFile();
 
 const PORT = Number(process.env.PORT || 3000);
-const DB_HOST = process.env.DB_HOST || process.env.RDS_HOST || 'localhost';
+const DB_HOST = (process.env.DB_HOST || process.env.RDS_HOST || '').trim();
 const DB_PORT = Number(process.env.DB_PORT || process.env.RDS_PORT || 3306);
-const DB_USER = process.env.DB_USER || process.env.RDS_USER || 'root';
+const DB_USER = (process.env.DB_USER || process.env.RDS_USER || 'root').trim();
 const DB_PASSWORD = process.env.DB_PASSWORD || process.env.RDS_PASSWORD || '';
-const DB_NAME = process.env.DB_NAME || process.env.RDS_DB_NAME || 'freshmart';
+const DB_NAME = (process.env.DB_NAME || process.env.RDS_DB_NAME || 'freshmart').trim();
 
-// In-memory fallback store when MySQL/RDS is not connected
-let memoryProducts = [
-  { id: 1, name: 'Organic Hass Avocados', category: 'Fruits & Vegetables', unit: 'Pack of 4 (approx. 700g)', price: 5.49, stock: 45, badge: 'Organic', image_url: 'assets/images/avocados.svg' },
-  { id: 2, name: 'Sweet Cavendish Bananas', category: 'Fruits & Vegetables', unit: '1 kg Bunch', price: 1.99, stock: 80, badge: 'Best Seller', image_url: 'assets/images/bananas.svg' },
-  { id: 3, name: 'Fresh Sweet Strawberries', category: 'Fruits & Vegetables', unit: '250g Punnet', price: 4.25, stock: 35, badge: 'Farm Fresh', image_url: 'assets/images/strawberries.svg' },
-  { id: 4, name: 'Organic Baby Spinach', category: 'Fruits & Vegetables', unit: '200g Washed Bag', price: 2.89, stock: 50, badge: 'Organic', image_url: 'assets/images/spinach.svg' },
-  { id: 5, name: 'Pasture-Raised Brown Eggs', category: 'Dairy & Eggs', unit: 'Dozen (12 Large Eggs)', price: 4.79, stock: 60, badge: 'Free Range', image_url: 'assets/images/eggs.svg' },
-  { id: 6, name: 'Fresh Whole Cow Milk', category: 'Dairy & Eggs', unit: '1 Liter Bottle', price: 2.49, stock: 65, badge: 'Daily Fresh', image_url: 'assets/images/milk.svg' },
-  { id: 7, name: 'Artisan Sourdough Loaf', category: 'Bakery', unit: '650g Freshly Baked', price: 4.99, stock: 22, badge: 'Baked Today', image_url: 'assets/images/sourdough.svg' },
-  { id: 8, name: 'French Butter Croissants', category: 'Bakery', unit: 'Box of 4 Pastries', price: 5.99, stock: 28, badge: 'Popular', image_url: 'assets/images/croissants.svg' },
-  { id: 9, name: 'Norwegian Atlantic Salmon Fillet', category: 'Meat & Seafood', unit: '400g Vacuum Pack', price: 12.99, stock: 18, badge: 'Wild Caught', image_url: 'assets/images/salmon.svg' },
-  { id: 10, name: 'Grass-Fed Beef Ribeye Steak', category: 'Meat & Seafood', unit: '350g Cut', price: 14.50, stock: 15, badge: 'Prime Cut', image_url: 'assets/images/steak.svg' },
-  { id: 11, name: 'Cold-Pressed Valencia Orange Juice', category: 'Pantry & Drinks', unit: '1 Liter Carafe', price: 4.50, stock: 40, badge: '100% Pure', image_url: 'assets/images/orange-juice.svg' },
-  { id: 12, name: 'Extra Virgin Olive Oil', category: 'Pantry & Drinks', unit: '500ml Glass Bottle', price: 9.99, stock: 30, badge: 'Cold Pressed', image_url: 'assets/images/olive-oil.svg' }
+const SEED_GROCERIES = [
+  ['Organic Hass Avocados', 'Fruits & Vegetables', 'Pack of 4 (approx. 700g)', 5.49, 45, 'Organic', 'assets/images/avocados.svg'],
+  ['Sweet Cavendish Bananas', 'Fruits & Vegetables', '1 kg Bunch', 1.99, 80, 'Best Seller', 'assets/images/bananas.svg'],
+  ['Fresh Sweet Strawberries', 'Fruits & Vegetables', '250g Punnet', 4.25, 35, 'Farm Fresh', 'assets/images/strawberries.svg'],
+  ['Organic Baby Spinach', 'Fruits & Vegetables', '200g Washed Bag', 2.89, 50, 'Organic', 'assets/images/spinach.svg'],
+  ['Pasture-Raised Brown Eggs', 'Dairy & Eggs', 'Dozen (12 Large Eggs)', 4.79, 60, 'Free Range', 'assets/images/eggs.svg'],
+  ['Fresh Whole Cow Milk', 'Dairy & Eggs', '1 Liter Bottle', 2.49, 65, 'Daily Fresh', 'assets/images/milk.svg'],
+  ['Artisan Sourdough Loaf', 'Bakery', '650g Freshly Baked', 4.99, 22, 'Baked Today', 'assets/images/sourdough.svg'],
+  ['French Butter Croissants', 'Bakery', 'Box of 4 Pastries', 5.99, 28, 'Popular', 'assets/images/croissants.svg'],
+  ['Norwegian Atlantic Salmon Fillet', 'Meat & Seafood', '400g Vacuum Pack', 12.99, 18, 'Wild Caught', 'assets/images/salmon.svg'],
+  ['Grass-Fed Beef Ribeye Steak', 'Meat & Seafood', '350g Cut', 14.50, 15, 'Prime Cut', 'assets/images/steak.svg'],
+  ['Cold-Pressed Valencia Orange Juice', 'Pantry & Drinks', '1 Liter Carafe', 4.50, 40, '100% Pure', 'assets/images/orange-juice.svg'],
+  ['Extra Virgin Olive Oil', 'Pantry & Drinks', '500ml Glass Bottle', 9.99, 30, 'Cold Pressed', 'assets/images/olive-oil.svg']
 ];
-let memoryOrders = [];
+
+let mysql = null;
+try {
+  mysql = require('mysql2/promise');
+} catch {
+  console.warn('[Warning] mysql2 module not installed.');
+}
 
 let dbPool = null;
-let lastDbError = 'MySQL driver not initialized';
+let schemaInitialized = false;
 
-try {
-  const mysql = require('mysql2/promise');
-  dbPool = mysql.createPool({
+function getPool() {
+  if (!mysql || !DB_HOST) return null;
+  if (!dbPool) {
+    dbPool = mysql.createPool({
+      host: DB_HOST,
+      port: DB_PORT,
+      user: DB_USER,
+      password: DB_PASSWORD,
+      database: DB_NAME,
+      waitForConnections: true,
+      connectionLimit: 10,
+      connectTimeout: 3000
+    });
+  }
+  return dbPool;
+}
+
+// Automatically create database, tables, and seed 12 groceries when RDS is reachable
+async function ensureDatabaseAndTables() {
+  if (!mysql || !DB_HOST) {
+    throw new Error('DB_HOST is not configured in .env');
+  }
+
+  if (schemaInitialized && dbPool) {
+    await dbPool.query('SELECT 1');
+    return dbPool;
+  }
+
+  // Connect without database name first in case 'freshmart' DB hasn't been created on RDS yet
+  const bootstrapConn = await mysql.createConnection({
     host: DB_HOST,
     port: DB_PORT,
     user: DB_USER,
     password: DB_PASSWORD,
-    database: DB_NAME,
-    waitForConnections: true,
-    connectionLimit: 10,
     connectTimeout: 3000
   });
-} catch (err) {
-  lastDbError = err.message;
+
+  await bootstrapConn.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\``);
+  await bootstrapConn.end();
+
+  const pool = getPool();
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS products (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(150) NOT NULL,
+      category VARCHAR(80) NOT NULL,
+      unit VARCHAR(80) DEFAULT '1 Pack',
+      price DECIMAL(10, 2) NOT NULL,
+      stock INT NOT NULL DEFAULT 25,
+      badge VARCHAR(50) DEFAULT 'Fresh',
+      image_url TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      customer_name VARCHAR(120) NOT NULL,
+      customer_phone VARCHAR(50) NOT NULL,
+      delivery_address TEXT NOT NULL,
+      items_summary TEXT NOT NULL,
+      total_amount DECIMAL(10, 2) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  const [countRows] = await pool.query('SELECT COUNT(*) AS cnt FROM products');
+  if (countRows[0].cnt === 0) {
+    await pool.query(
+      'INSERT INTO products (name, category, unit, price, stock, badge, image_url) VALUES ?',
+      [SEED_GROCERIES]
+    );
+  }
+
+  schemaInitialized = true;
+  return pool;
 }
 
-async function checkDbStatus() {
-  if (!dbPool) {
-    return { connected: false, error: lastDbError };
-  }
-  try {
-    await dbPool.query('SELECT 1');
-    lastDbError = null;
-    return { connected: true, error: null };
-  } catch (err) {
-    lastDbError = err.code || err.message || 'Connection refused';
-    return { connected: false, error: lastDbError };
-  }
+const express = require('express');
+const app = express();
+app.set('trust proxy', true);
+
+try {
+  const cors = require('cors');
+  app.use(cors());
+} catch {
+  // Optional cors
 }
 
-const MIME_TYPES = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'application/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.ico': 'image/x-icon'
-};
+app.use(express.json());
+app.use(express.static(path.join(__dirname)));
 
-function startServer() {
+// AWS ALB Health Check (Always returns 200 OK so EC2 Target Group stays Healthy)
+app.get(['/health', '/api/health'], async (req, res) => {
+  let dbConnected = false;
   try {
-    const express = require('express');
-    const app = express();
-    app.set('trust proxy', true);
-
-    try {
-      const cors = require('cors');
-      app.use(cors());
-    } catch {
-      // Optional cors
-    }
-
-    app.use(express.json());
-    app.use(express.static(path.join(__dirname)));
-
-    app.get(['/health', '/api/health'], async (req, res) => {
-      const dbCheck = await checkDbStatus();
-      res.status(200).json({
-        status: 'healthy',
-        instance_hostname: os.hostname(),
-        database: dbCheck.connected ? 'connected' : 'standalone-fallback',
-        db_connected: dbCheck.connected,
-        db_host: DB_HOST,
-        db_name: DB_NAME,
-        db_error: dbCheck.error,
-        timestamp: new Date().toISOString()
-      });
-    });
-
-    app.get('/api/products', async (req, res) => {
-      const dbCheck = await checkDbStatus();
-      if (dbCheck.connected) {
-        try {
-          const [rows] = await dbPool.query('SELECT * FROM products ORDER BY id DESC');
-          if (Array.isArray(rows) && rows.length > 0) {
-            res.set('X-Data-Source', 'rds-mysql');
-            return res.json(rows.map((r) => ({ ...r, data_source: 'rds' })));
-          }
-        } catch (err) {
-          lastDbError = err.code || err.message;
-        }
-      }
-      res.set('X-Data-Source', 'local-fallback');
-      res.json(memoryProducts.map((r) => ({ ...r, data_source: 'fallback' })));
-    });
-
-    app.post('/api/products', async (req, res) => {
-      const { name, category, unit, price, stock, badge, image_url } = req.body || {};
-      const finalImageUrl = image_url || 'assets/images/avocados.svg';
-
-      const dbCheck = await checkDbStatus();
-      if (dbCheck.connected) {
-        try {
-          const [result] = await dbPool.query(
-            'INSERT INTO products (name, category, unit, price, stock, badge, image_url) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [name, category, unit || '1 Pack', Number(price), Number(stock), badge || 'Fresh', finalImageUrl]
-          );
-          return res.status(201).json({ id: result.insertId, image_url: finalImageUrl, data_source: 'rds' });
-        } catch (err) {
-          lastDbError = err.code || err.message;
-        }
-      }
-
-      const newItem = {
-        id: Date.now(),
-        name: name || 'New Grocery Item',
-        category: category || 'Fruits & Vegetables',
-        unit: unit || '1 Pack',
-        price: Number(price || 4.99),
-        stock: Number(stock || 25),
-        badge: badge || 'Fresh',
-        image_url: finalImageUrl,
-        data_source: 'fallback'
-      };
-      memoryProducts.unshift(newItem);
-      res.status(201).json(newItem);
-    });
-
-    app.delete('/api/products/:id', async (req, res) => {
-      const id = req.params.id;
-      const dbCheck = await checkDbStatus();
-      if (dbCheck.connected) {
-        try {
-          await dbPool.query('DELETE FROM products WHERE id = ?', [id]);
-          return res.json({ deleted: true, data_source: 'rds' });
-        } catch (err) {
-          lastDbError = err.code || err.message;
-        }
-      }
-      memoryProducts = memoryProducts.filter((p) => String(p.id) !== String(id));
-      res.json({ deleted: true, data_source: 'fallback' });
-    });
-
-    app.get('/api/orders', async (req, res) => {
-      const dbCheck = await checkDbStatus();
-      if (dbCheck.connected) {
-        try {
-          const [rows] = await dbPool.query('SELECT * FROM orders ORDER BY created_at DESC LIMIT 50');
-          return res.json(rows.map((r) => ({ ...r, data_source: 'rds' })));
-        } catch (err) {
-          lastDbError = err.code || err.message;
-        }
-      }
-      res.json(memoryOrders.map((r) => ({ ...r, data_source: 'fallback' })));
-    });
-
-    app.post('/api/orders', async (req, res) => {
-      const { customer_name, customer_phone, delivery_address, items_summary, total_amount } = req.body || {};
-      const dbCheck = await checkDbStatus();
-      if (dbCheck.connected) {
-        try {
-          const [result] = await dbPool.query(
-            'INSERT INTO orders (customer_name, customer_phone, delivery_address, items_summary, total_amount) VALUES (?, ?, ?, ?, ?)',
-            [customer_name, customer_phone, delivery_address, items_summary, Number(total_amount)]
-          );
-          return res.status(201).json({ id: result.insertId, data_source: 'rds' });
-        } catch (err) {
-          lastDbError = err.code || err.message;
-        }
-      }
-      const newOrder = {
-        id: Date.now().toString().slice(-5),
-        customer_name,
-        customer_phone,
-        delivery_address,
-        items_summary,
-        total_amount: Number(total_amount || 0),
-        data_source: 'fallback',
-        created_at: new Date().toISOString()
-      };
-      memoryOrders.unshift(newOrder);
-      res.status(201).json(newOrder);
-    });
-
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`FreshMart Express Server listening on http://0.0.0.0:${PORT}`);
-    });
+    await ensureDatabaseAndTables();
+    dbConnected = true;
   } catch {
-    const server = http.createServer((req, res) => {
-      const urlPath = (req.url || '/').split('?')[0];
-      if (urlPath === '/health' || urlPath === '/api/health') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(
-          JSON.stringify({
-            status: 'healthy',
-            instance_hostname: os.hostname(),
-            database: 'standalone-fallback',
-            db_connected: false,
-            db_host: DB_HOST,
-            db_name: DB_NAME,
-            db_error: 'Running in built-in HTTP fallback mode'
-          })
-        );
-      }
-      if (urlPath === '/api/products' && req.method === 'GET') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify(memoryProducts.map((r) => ({ ...r, data_source: 'fallback' }))));
-      }
-      if (urlPath === '/api/orders' && req.method === 'GET') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify(memoryOrders));
-      }
+    dbConnected = false;
+  }
 
-      const safeRelPath = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
-      const filePath = path.join(__dirname, safeRelPath);
+  res.status(200).json({
+    status: 'healthy',
+    instance_hostname: os.hostname(),
+    database: dbConnected ? 'connected' : 'disconnected',
+    timestamp: new Date().toISOString()
+  });
+});
 
-      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-        const ext = path.extname(filePath).toLowerCase();
-        res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] || 'application/octet-stream' });
-        fs.createReadStream(filePath).pipe(res);
-      } else {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Not Found');
-      }
-    });
-
-    server.listen(PORT, '0.0.0.0', () => {
-      console.log(`FreshMart Built-in HTTP Server listening on http://0.0.0.0:${PORT}`);
+// GET /api/products — Only returns grocery list when connected to RDS/MySQL
+app.get('/api/products', async (req, res) => {
+  try {
+    const pool = await ensureDatabaseAndTables();
+    const [rows] = await pool.query('SELECT * FROM products ORDER BY id ASC');
+    res.json(rows);
+  } catch (err) {
+    res.status(503).json({
+      error: 'Database connection unavailable',
+      details: err.message,
+      products: []
     });
   }
-}
+});
 
-startServer();
+// POST /api/products — Requires RDS/MySQL
+app.post('/api/products', async (req, res) => {
+  try {
+    const pool = await ensureDatabaseAndTables();
+    const { name, category, unit, price, stock, badge, image_url } = req.body || {};
+    const finalImageUrl = image_url || 'assets/images/avocados.svg';
 
+    const [result] = await pool.query(
+      'INSERT INTO products (name, category, unit, price, stock, badge, image_url) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [name, category, unit || '1 Pack', Number(price), Number(stock), badge || 'Fresh', finalImageUrl]
+    );
+    res.status(201).json({ id: result.insertId, image_url: finalImageUrl });
+  } catch (err) {
+    res.status(503).json({ error: 'Database connection unavailable: ' + err.message });
+  }
+});
+
+// DELETE /api/products/:id — Requires RDS/MySQL
+app.delete('/api/products/:id', async (req, res) => {
+  try {
+    const pool = await ensureDatabaseAndTables();
+    await pool.query('DELETE FROM products WHERE id = ?', [req.params.id]);
+    res.json({ deleted: true });
+  } catch (err) {
+    res.status(503).json({ error: 'Database connection unavailable: ' + err.message });
+  }
+});
+
+// POST /api/products/reset — Restores the 12 default groceries in RDS
+app.post('/api/products/reset', async (req, res) => {
+  try {
+    const pool = await ensureDatabaseAndTables();
+    await pool.query('DELETE FROM products');
+    await pool.query(
+      'INSERT INTO products (name, category, unit, price, stock, badge, image_url) VALUES ?',
+      [SEED_GROCERIES]
+    );
+    res.json({ reset: true });
+  } catch (err) {
+    res.status(503).json({ error: 'Database connection unavailable: ' + err.message });
+  }
+});
+
+// GET /api/orders — Requires RDS/MySQL
+app.get('/api/orders', async (req, res) => {
+  try {
+    const pool = await ensureDatabaseAndTables();
+    const [rows] = await pool.query('SELECT * FROM orders ORDER BY created_at DESC LIMIT 50');
+    res.json(rows);
+  } catch (err) {
+    res.status(503).json({ error: 'Database connection unavailable', orders: [] });
+  }
+});
+
+// POST /api/orders — Requires RDS/MySQL
+app.post('/api/orders', async (req, res) => {
+  try {
+    const pool = await ensureDatabaseAndTables();
+    const { customer_name, customer_phone, delivery_address, items_summary, total_amount } = req.body || {};
+    const [result] = await pool.query(
+      'INSERT INTO orders (customer_name, customer_phone, delivery_address, items_summary, total_amount) VALUES (?, ?, ?, ?, ?)',
+      [customer_name, customer_phone, delivery_address, items_summary, Number(total_amount)]
+    );
+    res.status(201).json({ id: result.insertId });
+  } catch (err) {
+    res.status(503).json({ error: 'Database connection unavailable: ' + err.message });
+  }
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`FreshMart Grocery Server listening on http://0.0.0.0:${PORT}`);
+});
