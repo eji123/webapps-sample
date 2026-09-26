@@ -1,0 +1,6 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 300" width="400" height="300">
+  <rect width="400" height="300" rx="24" fill="#dcfce7"/>
+  <circle cx="200" cy="135" r="72" fill="#ffffff" fill-opacity="0.75"/>
+  <text x="200" y="160" font-size="84" text-anchor="middle" dominant-baseline="middle">🥬</text>
+  <text x="200" y="248" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="700" fill="#15803d" text-anchor="middle">Organic Baby Spinach</text>
+</svg>

@@ -19,27 +19,70 @@ echo "📦 [1/6] Updating Ubuntu packages and installing system dependencies..."
 sudo apt-get update -y
 sudo apt-get install -y curl git unzip build-essential mysql-client nginx
 
-# 2. Install Node.js 20 LTS & npm (if not installed)
-if ! command -v node >/dev/null 2>&1; then
-  echo "🟢 [2/6] Installing Node.js 20 LTS..."
-  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-  sudo apt-get install -y nodejs
+# 2. Install Node.js & npm (if not installed) - Supports Ubuntu 20.04 / 22.04 / 24.04 / 26.04
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+  echo "🟢 [2/6] Installing Node.js & npm..."
+  if curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -; then
+    sudo apt-get install -y nodejs
+  else
+    sudo apt-get install -y nodejs npm
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    sudo apt-get install -y npm
+  fi
 else
-  echo "🟢 [2/6] Node.js is already installed ($(node -v))."
+  echo "🟢 [2/6] Node.js ($(node -v)) & npm ($(npm -v)) are already installed."
 fi
 
 # 3. Install PM2 Process Manager globally
 echo "⚙️  [3/6] Installing PM2 process manager..."
 sudo npm install -g pm2
 
-# 4. Install Node.js application dependencies from package.json
+# 4. Ensure package.json is valid (not empty) & install application dependencies
+if [ ! -s package.json ]; then
+  echo "⚠️  package.json is empty or missing. Generating default package.json..."
+  cat > package.json <<'EOF'
+{
+  "name": "freshmart-grocery-webapp",
+  "version": "1.0.0",
+  "description": "FreshMart Online Grocery Store Web Application (Node.js/Express + MySQL + AWS ALB)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.540.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "mysql2": "^3.9.7"
+  }
+}
+EOF
+fi
+
 echo "📚 [4/6] Installing application npm dependencies..."
 npm install
 
-# Create .env from .env.example if .env does not exist
-if [ ! -f .env ]; then
-  echo "📝 Creating .env configuration file from .env.example..."
-  cp .env.example .env
+# Create .env from .env.example if .env does not exist or is empty
+if [ ! -s .env ]; then
+  echo "📝 Creating default .env configuration file..."
+  if [ -s .env.example ]; then
+    cp .env.example .env
+  else
+    cat > .env <<'EOF'
+PORT=3000
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=
+DB_NAME=freshmart
+AWS_REGION=ap-southeast-1
+S3_BUCKET_NAME=
+EOF
+  fi
 fi
 
 # 5. Configure Nginx on Port 80 for AWS Application Load Balancer (ALB) traffic
