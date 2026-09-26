@@ -150,7 +150,6 @@ function renderCatalog() {
     .map((item) => {
       const cartEntry = cart.find((c) => Number(c.id) === Number(item.id));
       const qtyInCart = cartEntry ? cartEntry.qty : 0;
-      const fallbackImg = item.fallback_svg || createGrocerySvg(item.name, '#dcfce7', '🛒');
 
       return `
         <article class="product-card">
@@ -158,10 +157,9 @@ function renderCatalog() {
             ${item.badge ? `<span class="product-badge">${escapeHtml(item.badge)}</span>` : ''}
             <span class="stock-pill">${Number(item.stock)} in stock</span>
             <img
-              src="${escapeHtml(item.image_url || fallbackImg)}"
+              src="${escapeHtml(item.image_url || '')}"
               alt="${escapeHtml(item.name)}"
               class="product-thumb"
-              onerror="this.onerror=null;this.src='${fallbackImg}';"
             />
           </div>
           <div class="product-body">
@@ -499,37 +497,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Add Product Form
+  // Add Product Form (Uploads file directly to S3 via multipart/form-data)
   document.getElementById('addProductForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const formData = new FormData();
     const name = document.getElementById('prodName').value.trim();
-    const category = document.getElementById('prodCategory').value;
-    const unit = document.getElementById('prodUnit').value.trim() || '1 Pack';
-    const price = Number(document.getElementById('prodPrice').value);
-    const stock = Number(document.getElementById('prodStock').value);
-    const badge = document.getElementById('prodBadge').value.trim() || 'Fresh';
-    const imageUrlInput = document.getElementById('prodImageUrl').value.trim();
+    formData.append('name', name);
+    formData.append('category', document.getElementById('prodCategory').value);
+    formData.append('unit', document.getElementById('prodUnit').value.trim() || '1 Pack');
+    formData.append('price', document.getElementById('prodPrice').value);
+    formData.append('stock', document.getElementById('prodStock').value);
+    formData.append('badge', document.getElementById('prodBadge').value.trim() || 'Fresh');
+    formData.append('image_url', document.getElementById('prodImageUrl').value.trim() || 'assets/images/avocados.svg');
+
     const fileInput = document.getElementById('prodImageFile');
-
-    let image_url = imageUrlInput || 'assets/images/avocados.svg';
-
     if (fileInput?.files?.[0]) {
-      image_url = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.readAsDataURL(fileInput.files[0]);
-      });
+      formData.append('image', fileInput.files[0]);
     }
 
     try {
       const res = await fetch('/api/products', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, category, unit, price, stock, badge, image_url })
+        body: formData
       });
 
       if (!res.ok) {
-        showToast('Failed to add product: Database is not connected');
+        showToast('Failed to add product: Database or S3 is not connected');
         return;
       }
 

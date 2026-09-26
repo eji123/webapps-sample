@@ -1,7 +1,7 @@
 {
   "name": "freshmart-grocery-webapp",
   "version": "1.0.0",
-  "description": "FreshMart Online Grocery Store Web Application (Node.js/Express + MySQL + AWS ALB)",
+  "description": "FreshMart Online Grocery Store Web Application (Node.js/Express + MySQL RDS + Private S3 Pre-Signed URLs)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.540.0",
+    "@aws-sdk/s3-request-presigner": "^3.540.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
