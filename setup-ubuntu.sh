@@ -156,16 +156,38 @@ sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl restart nginx
 sudo systemctl enable nginx
 
-# 6. Start the FreshMart application with PM2 & enable auto-start on VM reboot
-echo "🚀 [6/6] Starting FreshMart application with PM2..."
-pm2 delete freshmart-app >/dev/null 2>&1 || true
-pm2 start server.js --name "freshmart-app"
-pm2 save
+# 6. Configure native systemd service (freshmart.service) so Port 3000 ALWAYS runs & auto-starts on reboot
+echo "🚀 [6/6] Configuring systemd service (freshmart.service) on Port 3000..."
+APP_DIR=$(pwd)
+NODE_BIN=$(command -v node || echo "/usr/bin/node")
 
-# Register PM2 with systemd so the app auto-starts if the private EC2 instance reboots
-PM2_BIN=$(command -v pm2 || echo "/usr/local/bin/pm2")
-sudo env PATH=$PATH:/usr/bin:/usr/local/bin "$PM2_BIN" startup systemd -u "$(whoami)" --hp "$HOME" >/dev/null 2>&1 || true
-pm2 save >/dev/null 2>&1 || true
+# Stop PM2 if running so it doesn't conflict with systemd on Port 3000
+pm2 delete freshmart-app >/dev/null 2>&1 || true
+pm2 kill >/dev/null 2>&1 || true
+
+sudo tee /etc/systemd/system/freshmart.service >/dev/null <<EOF
+[Unit]
+Description=FreshMart Online Grocery Node.js Server (Port 3000)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=${APP_DIR}
+EnvironmentFile=-${APP_DIR}/.env
+ExecStart=${NODE_BIN} ${APP_DIR}/server.js
+Restart=always
+RestartSec=2
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable freshmart.service
+sudo systemctl restart freshmart.service
 
 # Query EC2 Instance Metadata (IMDSv2) for Private IP, Instance ID, and AZ (No Public IP needed)
 TOKEN=$(curl -s -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60" --max-time 2 || true)

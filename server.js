@@ -238,8 +238,13 @@ async function ensureDatabaseAndTables() {
 }
 
 const express = require('express');
-const multer = require('multer');
-const upload = multer({ storage: multer.memoryStorage() });
+let upload = { single: () => (req, res, next) => next() };
+try {
+  const multer = require('multer');
+  upload = multer({ storage: multer.memoryStorage() });
+} catch {
+  console.warn('[Warning] multer not installed; file upload fallback active.');
+}
 
 const app = express();
 app.set('trust proxy', true);
